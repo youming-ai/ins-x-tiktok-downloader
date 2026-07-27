@@ -10,7 +10,9 @@ COPY package.json bun.lock* ./
 COPY packages/api/package.json ./packages/api/
 COPY packages/web/package.json ./packages/web/
 COPY packages/shared/package.json ./packages/shared/
-RUN bun install --frozen-lockfile
+# --ignore-scripts: skip the root "prepare" (lefthook install), which needs git and
+# only matters for local dev. No dep here relies on a postinstall at build time.
+RUN bun install --frozen-lockfile --ignore-scripts
 
 COPY packages/shared ./packages/shared
 COPY packages/api ./packages/api
