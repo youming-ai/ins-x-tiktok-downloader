@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:cf": "vite build --mode cf",
     "preview": "vite preview",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
