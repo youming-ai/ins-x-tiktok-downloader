@@ -7,6 +7,17 @@ services:
         VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
     container_name: snatch
     restart: unless-stopped
+    # Dokploy serves this compose app via its Traefik on the external
+    # dokploy-network. Compose apps must declare their own router — Dokploy's
+    # "Domains" UI does not inject labels for compose services. TLS via
+    # Dokploy's letsencrypt certresolver; Traefik forwards to the container PORT.
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.snatch.rule=Host(`${API_DOMAIN:-snatch-api.um1ng.me}`)
+      - traefik.http.routers.snatch.entryPoints=web,websecure
+      - traefik.http.routers.snatch.tls=true
+      - traefik.http.routers.snatch.tls.certresolver=letsencrypt
+      - traefik.http.services.snatch.loadbalancer.server.port=3001
     ports:
       - "${APP_PORT:-38700}:3001"
     environment:
