@@ -2,14 +2,17 @@
 
 Social media video downloader — Bun monorepo: a React + TanStack Start SPA served by a Hono API powered by a native `yt-dlp` engine.
 
-## Supported Platforms
+## Supported Sites
 
-| Platform | Video |
-|----------|-------|
-| X | ✅ |
-| TikTok | ✅ |
-| Instagram | ✅ |
-| YouTube | ❌ (removed) |
+Snatch is a thin shell around `yt-dlp`, so it accepts a link from any of the
+~1,800 sites yt-dlp supports. There is no host allowlist; the engine decides
+what it can actually extract, and some sites need cookies or fail behind
+anti-bot measures. The SPA highlights the popular ones (YouTube, X/Twitter,
+Instagram, Threads, TikTok, Vimeo, Twitch, Reddit, Facebook) from `SERVICES` in
+`packages/shared/src/constants.ts`.
+
+Private, loopback, link-local and single-label hosts are refused at the request
+boundary — see `validateUrl()` in `packages/shared/src/validation.ts`.
 
 ## Project Structure
 

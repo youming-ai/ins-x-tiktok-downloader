@@ -4,7 +4,7 @@ import { z } from "zod";
 /**
  * Zod schemas for the untrusted request boundary. Kept here (not in
  * `@snatch/shared`, which stays dependency-free) and layered over the pure
- * `validateUrl` host allowlist so validation logic lives in one place.
+ * `validateUrl` host check so validation logic lives in one place.
  */
 
 /** Query params arrive as "" when absent; treat that as unset. */

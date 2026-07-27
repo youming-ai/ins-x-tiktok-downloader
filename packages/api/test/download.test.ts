@@ -29,12 +29,12 @@ describe("POST /api/resolve validation", () => {
 		expect(res.status).toBe(400);
 	});
 
-	it("returns 400 when host is unsupported", async () => {
+	it("returns 400 when the host is private or internal", async () => {
 		const res = await app.fetch(
 			new Request("http://localhost:3001/api/resolve", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ url: "https://unknown-host-12345.com/video" }),
+				body: JSON.stringify({ url: "http://169.254.169.254/latest/meta-data/" }),
 			}),
 		);
 		expect(res.status).toBe(400);

@@ -5,14 +5,14 @@ Bun monorepo (3 workspace packages) that resolves and downloads media from socia
 ## Project Overview
 
 - Paste a URL → API probes it with `yt-dlp` → returns signed per-format download choices → browser downloads directly from the API via a plain `<a download>`.
-- Supported platforms: X/Twitter, TikTok, Instagram (video). YouTube is intentionally removed. Host allowlist is data-driven from `SERVICES` in `packages/shared/src/constants.ts`.
+- Supported sites: whatever `yt-dlp` reaches (~1,800). There is **no** host allowlist — `validateUrl` accepts any public http(s) URL and only refuses private/loopback/link-local/single-label hosts. `SERVICES` in `packages/shared/src/constants.ts` is UI copy for the "popular services" grid, mirroring upstream [yoinks](https://github.com/pablostanley/yoinks).
 - The engine needs `child_process` + a writable filesystem, so it **cannot run on Cloudflare Workers/Pages** — only the static SPA can be hosted there (why the split topology exists; the Worker serves assets only).
 
 ## Package Boundaries
 
 | Package | Role | Entrypoint | Runtime deps |
 |---|---|---|---|
-| `packages/shared` | Types, constants, URL validation, host allowlist | `src/index.ts` | **zero** — no framework, no `zod` |
+| `packages/shared` | Types, constants, URL validation | `src/index.ts` | **zero** — no framework, no `zod` |
 | `packages/api` | Hono server, yt-dlp engine, routes, middleware, URL signing | `src/index.ts` (Bun entry) | `hono`, `hono-pino`, `pino`, `zod`, `@sentry/bun`, `@snatch/shared` |
 | `packages/web` | TanStack Start SPA (`ssr: false`) | `src/routes/__root.tsx` → `routes/index.tsx` | React 19, `@tanstack/react-{start,router,form}`, `@sentry/react`, `lucide-react`, `zod`, Tailwind v4 |
 
@@ -54,8 +54,8 @@ Both:        POST /api/resolve → cors → rateLimit → apiKeyAuth → validat
 - `packages/api/src/middleware/rate-limit.ts` — in-memory limiter keyed by `cf-connecting-ip`/`fly-client-ip` (not `x-forwarded-for`), UA-hash fallback; exports `clearClients()`.
 - `packages/api/src/middleware/auth.ts` — `apiKeyAuth()`: optional `API_KEY`-gated `Authorization: Api-Key <value>`, no-op when unset.
 - `packages/api/src/schemas/media.ts` — `resolveInputSchema` layers shared `validateUrl` onto structural Zod checks; narrow new request options here.
-- `packages/shared/src/validation.ts` — exports only `validateUrl()` and `detectPlatform()` (pure). No `sanitizeUrl`.
-- `packages/shared/src/constants.ts` — `SERVICES`, `PLATFORM_HOSTS` (single source of truth). `types.ts` — wire contract + `AUDIO_FORMATS`/`VIDEO_QUALITIES`/`DOWNLOAD_MODES`.
+- `packages/shared/src/validation.ts` — exports only `validateUrl()` (pure). No `sanitizeUrl`, no `detectPlatform`.
+- `packages/shared/src/constants.ts` — `SERVICES` (UI labels only, no hosts). `types.ts` — wire contract + `AUDIO_FORMATS`/`VIDEO_QUALITIES`/`DOWNLOAD_MODES`.
 - `packages/web/src/config.ts` — `API_BASE_URL` from `VITE_API_BASE_URL`. `components/DownloaderApp.tsx` — owns UI state + resolve/download flow.
 - `packages/web/src/routeTree.gen.ts` — generated; commit it, never edit, excluded from Biome.
 - `biome.json`, `bunfig.toml` (`[test] root="."`), `wrangler.jsonc` (assets-only SPA Worker → `packages/web/dist/client`), `packages/api/Dockerfile` (two-stage; runtime installs `ca-certificates` + `ffmpeg` only), `docker-compose.yml` (external `dokploy-network` required), `.env.example`, `.github/workflows/ci.yml`.
@@ -87,7 +87,7 @@ bun run docker:up    # docker compose up -d --build
 
 - **Biome** owns formatting + linting. Tabs, line width **100**, double quotes, semicolons always, trailing commas all. Blocking: `noUnusedVariables`/`noUnusedImports`/`useConst`/`noUselessStringConcat` **error**; `noNonNullAssertion`/`noExplicitAny` **warn**. Scans `packages/*/src` (+ `api/test`), excludes `routeTree.gen.ts`.
 - **Clean cutover**: migrate every caller and delete the old path — no aliases, shims, dead code, or commented-out blocks.
-- **Validate at boundaries**: URL validation lives in `shared` (pure); the API Zod schema calls `validateUrl()`; the web form uses Zod plus `detectPlatform()` at submit. Untrusted yt-dlp stdout passes through `parseVideoInfo()`. Keep `shared` zero-dependency.
+- **Validate at boundaries**: URL validation lives in `shared` (pure); both the API Zod schema and the web form call `validateUrl()`, so client feedback and server rejection never drift. Its host check is a cheap literal-hostname filter, not a network boundary — it cannot see a public name resolving to a private address, DNS rebinding, or redirects yt-dlp follows. Untrusted yt-dlp stdout passes through `parseVideoInfo()`. Keep `shared` zero-dependency.
 - **Boundary narrowing**: request options flow through `schemas/media.ts`. Add new options to the shared enum arrays, not ad-hoc string checks.
 - **Hono routes**: one file per router under `routes/`, exported `<name>Router`, mounted `app.route("/", <name>Router)`. Handlers always return `c.json(...)` with an explicit status.
 - **React state**: no state library — `useState` per concern in `DownloaderApp`; TanStack Form owns form values. Root wraps the app in `ErrorBoundary`. `lucide-react` icons. Tailwind v4 is CSS-first (`src/styles.css`, no `tailwind.config.js`).
@@ -143,7 +143,7 @@ bun run docker:up    # docker compose up -d --build
 ## Anti-Patterns (avoid without discussion)
 
 - Adding a runtime dependency to `packages/shared`.
-- Hand-rolling URL parsing outside `validateUrl` / `detectPlatform`.
+- Hand-rolling URL parsing outside `validateUrl`.
 - Server-side React / SSR.
 - Bare `bun build` for the aggregate build (use `bun run build`).
 - Bypassing lefthook hooks with `--no-verify`.

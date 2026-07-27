@@ -1,4 +1,4 @@
-import { detectPlatform, type ResolveResponse, SERVICES } from "@snatch/shared";
+import { type ResolveResponse, SERVICES, validateUrl } from "@snatch/shared";
 import { CheckCircle, Download, Loader2, Settings, X, XCircle } from "lucide-react";
 import { useCallback, useState } from "react";
 import { API_BASE_URL } from "../config";
@@ -61,8 +61,9 @@ export function DownloaderApp() {
 			return;
 		}
 
-		if (!detectPlatform(url)) {
-			setError("Unsupported link. Paste a URL from one of the services listed below.");
+		const validation = validateUrl(url);
+		if (!validation.valid) {
+			setError(validation.error ?? "Invalid URL");
 			return;
 		}
 
@@ -157,9 +158,7 @@ export function DownloaderApp() {
 								<span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
 								<span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
 							</span>
-							<span className="text-sm font-medium text-gray-300">
-								{SERVICES.length}+ services supported
-							</span>
+							<span className="text-sm font-medium text-gray-300">1,800+ sites supported</span>
 						</div>
 
 						<h1 className="text-5xl md:text-7xl font-bold tracking-tight animate-in fade-in slide-in-from-bottom-8 duration-700 delay-100">
@@ -302,12 +301,14 @@ export function DownloaderApp() {
 					</div>
 				)}
 
-				{/* Supported Services */}
+				{/* Popular Services */}
 				<div className="space-y-8 max-w-4xl mx-auto">
 					<div className="text-center space-y-3">
-						<h2 className="text-2xl md:text-3xl font-bold">Supported services</h2>
+						<h2 className="text-2xl md:text-3xl font-bold">Popular services</h2>
 						<p className="text-gray-400 max-w-2xl mx-auto text-sm">
-							Paste a link from any of these and Snatch grabs the original file.
+							These are the links people paste most. Snatch runs on yt-dlp, so you can paste a URL
+							from any of the ~1,800 sites it supports — some need cookies or block downloads, so
+							not every link resolves.
 						</p>
 					</div>
 

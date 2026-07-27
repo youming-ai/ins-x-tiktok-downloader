@@ -1,45 +1,21 @@
 /**
- * Every service the yt-dlp engine can fetch, its display label, and the
- * host(s) whose URLs we accept. yt-dlp does the real extraction — snatch
- * only gates on a known host, so this list is the single source of truth for
- * both URL validation and the UI's "supported services" grid.
+ * The services snatch names in the UI, mirroring the set upstream yoinks
+ * highlights. This is **not** an allowlist: yt-dlp does the real extraction and
+ * reaches ~1,800 sites, so any public http(s) URL is accepted (see
+ * `validation.ts`). The list only drives the "popular services" grid.
  */
 export const SERVICES = [
-	{ id: "bilibili", label: "bilibili", hosts: ["bilibili.com", "b23.tv"] },
-	{ id: "bluesky", label: "Bluesky", hosts: ["bsky.app"] },
-	{ id: "dailymotion", label: "Dailymotion", hosts: ["dailymotion.com", "dai.ly"] },
-	{ id: "facebook", label: "Facebook", hosts: ["facebook.com", "fb.watch"] },
-	{ id: "instagram", label: "Instagram", hosts: ["instagram.com"] },
-	{ id: "loom", label: "Loom", hosts: ["loom.com"] },
-	{ id: "ok", label: "OK.ru", hosts: ["ok.ru"] },
-	{ id: "pinterest", label: "Pinterest", hosts: ["pinterest.com", "pin.it"] },
-	{ id: "newgrounds", label: "Newgrounds", hosts: ["newgrounds.com"] },
-	{ id: "reddit", label: "Reddit", hosts: ["reddit.com", "redd.it"] },
-	{ id: "rutube", label: "Rutube", hosts: ["rutube.ru"] },
-	{ id: "snapchat", label: "Snapchat", hosts: ["snapchat.com"] },
-	{ id: "soundcloud", label: "SoundCloud", hosts: ["soundcloud.com"] },
-	{ id: "streamable", label: "Streamable", hosts: ["streamable.com"] },
-	{ id: "tiktok", label: "TikTok", hosts: ["tiktok.com"] },
-	{ id: "tumblr", label: "Tumblr", hosts: ["tumblr.com"] },
-	{ id: "twitch", label: "Twitch Clips", hosts: ["twitch.tv", "clips.twitch.tv"] },
-	{ id: "twitter", label: "X / Twitter", hosts: ["x.com", "twitter.com"] },
-	{ id: "vimeo", label: "Vimeo", hosts: ["vimeo.com"] },
-	{ id: "vk", label: "VK", hosts: ["vk.com", "vkvideo.ru"] },
-	{ id: "youtube", label: "YouTube", hosts: ["youtube.com", "youtu.be"] },
+	{ id: "youtube", label: "YouTube" },
+	{ id: "x", label: "X / Twitter" },
+	{ id: "instagram", label: "Instagram" },
+	{ id: "threads", label: "Threads" },
+	{ id: "tiktok", label: "TikTok" },
+	{ id: "vimeo", label: "Vimeo" },
+	{ id: "twitch", label: "Twitch" },
+	{ id: "reddit", label: "Reddit" },
+	{ id: "facebook", label: "Facebook" },
 ] as const;
 
-export type SupportedPlatform = (typeof SERVICES)[number]["id"];
-
-export const PLATFORM_HOSTS = SERVICES.reduce(
-	(acc, s) => {
-		acc[s.id] = [...s.hosts];
-		return acc;
-	},
-	{} as Record<SupportedPlatform, string[]>,
-);
-
-export const ALLOWED_PLATFORM_DOMAINS = SERVICES.flatMap((s) => [...s.hosts]);
-
-// Real share URLs never contain whitespace. `new URL()` parsing + the host
-// allowlist do the actual security work; this just rejects malformed input.
+// Real share URLs never contain whitespace. `new URL()` parsing does the real
+// work; this just rejects obviously malformed input.
 export const WHITESPACE_ONLY_REGEX = /\s/;
