@@ -16,6 +16,13 @@ export default defineConfig({
 			},
 		},
 	},
+	// Pin IPv4 loopback for the build-time prerender: TanStack Start's prerender spins
+	// up the Vite preview server and fetches its own URL. Under Bun in a container,
+	// binding and fetching the bare name "localhost" can resolve to mismatched IPv4/IPv6
+	// families, causing ConnectionRefused. Forcing 127.0.0.1 aligns bind + fetch + URL.
+	preview: {
+		host: "127.0.0.1",
+	},
 	plugins: [
 		tanstackStart({ spa: { enabled: true, prerender: { outputPath: "/index" } } }),
 		// react's plugin must come after start's plugin
