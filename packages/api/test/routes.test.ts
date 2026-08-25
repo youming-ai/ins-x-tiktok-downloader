@@ -18,13 +18,13 @@ describe("API Routes", () => {
 			expect(data.success).toBe(false);
 		});
 
-		it("should reject unsupported media options with 400", async () => {
+		it("should ignore unknown fields and validate only the URL", async () => {
 			const res = await app.fetch(
 				new Request("http://localhost:3001/api/resolve", {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({
-						url: "https://x.com/user/status/1",
+						url: "not a url",
 						videoQuality: "not-a-quality",
 					}),
 				}),
@@ -44,11 +44,11 @@ describe("API Routes", () => {
 		});
 	});
 
-	describe("GET /api/download", () => {
+	describe("GET /api/download/progress", () => {
 		it("should reject requests without a signature", async () => {
 			const res = await app.fetch(
 				new Request(
-					"http://localhost:3001/api/download?url=https://x.com/user/status/1&choiceId=a-mp3&infoJson=/tmp/x.json",
+					"http://localhost:3001/api/download/progress?url=https://x.com/user/status/1&choiceId=a-mp3&infoJson=/tmp/x.json",
 				),
 			);
 			expect(res.status).toBe(400);
@@ -57,8 +57,24 @@ describe("API Routes", () => {
 		it("should reject a tampered info-json path (bad signature)", async () => {
 			const res = await app.fetch(
 				new Request(
-					"http://localhost:3001/api/download?url=https://x.com/user/status/1&choiceId=a-mp3&infoJson=/etc/passwd&audioFormat=&videoQuality=&downloadMode=&sig=deadbeef",
+					"http://localhost:3001/api/download/progress?url=https://x.com/user/status/1&choiceId=a-mp3&infoJson=/etc/passwd&sig=deadbeef",
 				),
+			);
+			expect(res.status).toBe(403);
+		});
+	});
+
+	describe("GET /api/download", () => {
+		it("should reject requests without a signature", async () => {
+			const res = await app.fetch(
+				new Request("http://localhost:3001/api/download?file=/tmp/video.mp4"),
+			);
+			expect(res.status).toBe(400);
+		});
+
+		it("should reject a tampered file path (bad signature)", async () => {
+			const res = await app.fetch(
+				new Request("http://localhost:3001/api/download?file=/etc/passwd&sig=deadbeef"),
 			);
 			expect(res.status).toBe(403);
 		});

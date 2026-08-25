@@ -15,7 +15,3 @@ export const SERVICES = [
 	{ id: "reddit", label: "Reddit" },
 	{ id: "facebook", label: "Facebook" },
 ] as const;
-
-// Real share URLs never contain whitespace. `new URL()` parsing does the real
-// work; this just rejects obviously malformed input.
-export const WHITESPACE_ONLY_REGEX = /\s/;

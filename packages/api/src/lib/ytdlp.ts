@@ -6,43 +6,11 @@ import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import type { MediaOptions } from "@snatch/shared";
 
 const SNATCH_DIR = process.env.YTDLP_DIR || path.join(os.homedir(), ".snatch", "bin");
 const RELEASE_BASE = "https://github.com/yt-dlp/yt-dlp/releases/latest/download";
 
-/** Prefix for the on-disk probe cache written by {@link probe}. */
-const INFO_JSON_PREFIX = "snatch-info-";
-/** Abandoned probe-cache files older than this are swept on the next probe. */
-const INFO_JSON_TTL_MS = 30 * 60 * 1000;
-
-/**
- * Delete stale probe-cache files left behind by /api/resolve calls that were
- * never followed by a download. Runs opportunistically on each probe, so no
- * background timer is needed.
- */
-async function reapStaleInfoJson(dir: string): Promise<void> {
-	const now = Date.now();
-	let entries: string[];
-	try {
-		entries = await fs.readdir(dir);
-	} catch {
-		return;
-	}
-	await Promise.allSettled(
-		entries
-			.filter((name) => name.startsWith(INFO_JSON_PREFIX) && name.endsWith(".json"))
-			.map(async (name) => {
-				const full = path.join(dir, name);
-				try {
-					const st = await fs.stat(full);
-					if (now - st.mtimeMs > INFO_JSON_TTL_MS) await fs.rm(full, { force: true });
-				} catch {
-					// already gone or unreadable — ignore
-				}
-			}),
-	);
-}
+const INFO_JSON_PREFIX = "snatch-info-"; // ponytail: stale probe jsons rely on explicit rm after download + OS tmp cleanup; no background sweep
 
 function ytDlpAssetName(): string {
 	if (process.platform === "win32") return "yt-dlp.exe";
@@ -198,94 +166,73 @@ export async function probe(
 	const stdout = await promise;
 	const info = parseVideoInfo(stdout);
 
-	const tmpDir = os.tmpdir();
-	await reapStaleInfoJson(tmpDir);
-	const infoJsonPath = path.join(tmpDir, `${INFO_JSON_PREFIX}${process.pid}-${Date.now()}.json`);
+	const infoJsonPath = path.join(
+		os.tmpdir(),
+		`${INFO_JSON_PREFIX}${process.pid}-${Date.now()}.json`,
+	);
 	await fs.writeFile(infoJsonPath, stdout);
 	return { info, infoJsonPath };
 }
 
 const MAX_VIDEO_CHOICES = 8;
 
-export function buildChoices(
-	info: VideoInfo,
-	options?: Pick<MediaOptions, "audioFormat" | "videoQuality" | "downloadMode">,
-): DownloadChoice[] {
+export function buildChoices(info: VideoInfo): DownloadChoice[] {
 	const formats = info.formats ?? [];
 	const choices: DownloadChoice[] = [];
-	const requestedAudioFmt = options?.audioFormat ?? "mp3";
-	const audioOnly = options?.downloadMode === "audio";
-	const maxHeight =
-		options?.videoQuality && options.videoQuality !== "max"
-			? Number.parseInt(options.videoQuality, 10)
-			: undefined;
 
-	const audioFormats = formats.filter(
+	const audioOnly = formats.filter(
 		(f) => f.acodec && f.acodec !== "none" && (!f.vcodec || f.vcodec === "none"),
 	);
-	const bestAudio = [...audioFormats].sort(
-		(a, b) => (b.abr ?? b.tbr ?? 0) - (a.abr ?? a.tbr ?? 0),
-	)[0];
+	const bestAudio = [...audioOnly].sort((a, b) => (b.abr ?? b.tbr ?? 0) - (a.abr ?? a.tbr ?? 0))[0];
 	const audioSize = bestAudio?.filesize ?? bestAudio?.filesize_approx;
 
-	if (!audioOnly) {
-		const videos = formats.filter((f) => f.vcodec && f.vcodec !== "none" && f.height);
-		let heights = [...new Set(videos.map((f) => f.height as number))].sort((a, b) => b - a);
-		if (maxHeight !== undefined && Number.isFinite(maxHeight)) {
-			heights = heights.filter((h) => h <= maxHeight);
-		}
+	const videos = formats.filter((f) => f.vcodec && f.vcodec !== "none" && f.height);
+	const heights = [...new Set(videos.map((f) => f.height as number))].sort((a, b) => b - a);
 
-		for (const height of heights.slice(0, MAX_VIDEO_CHOICES)) {
-			const candidates = videos.filter((f) => f.height === height);
-			const best = [...candidates].sort((a, b) => scoreVideo(b) - scoreVideo(a))[0];
-			const muxed = best.acodec && best.acodec !== "none";
-			const size = (best.filesize ?? best.filesize_approx ?? 0) + (muxed ? 0 : (audioSize ?? 0));
-			const sizeLabel = size > 0 ? formatBytes(size) : undefined;
-			const ext = "mp4";
+	for (const height of heights.slice(0, MAX_VIDEO_CHOICES)) {
+		const candidates = videos.filter((f) => f.height === height);
+		const best = [...candidates].sort((a, b) => scoreVideo(b) - scoreVideo(a))[0];
+		const muxed = best.acodec && best.acodec !== "none";
+		const size = (best.filesize ?? best.filesize_approx ?? 0) + (muxed ? 0 : (audioSize ?? 0));
+		const sizeLabel = size > 0 ? formatBytes(size) : undefined;
+		const ext = "mp4";
 
-			choices.push({
-				id: `v-${height}p`,
-				kind: "video",
-				quality: `${height}p`,
-				ext,
-				label: `${height}p (${ext})${sizeLabel ? ` · ~${sizeLabel}` : ""}`,
-				sizeLabel,
-				args: [
-					"-f",
-					`bv*[height=${height}]+ba/b[height=${height}]/bv*[height<=${height}]+ba/b`,
-					"--merge-output-format",
-					"mp4",
-				],
-			});
-		}
+		choices.push({
+			id: `v-${height}p`,
+			kind: "video",
+			quality: `${height}p`,
+			ext,
+			label: `${height}p · ${ext}${sizeLabel ? ` · ~${sizeLabel}` : ""}`,
+			sizeLabel,
+			args: [
+				"-f",
+				`bv*[height=${height}]+ba/b[height=${height}]/bv*[height<=${height}]+ba/b`,
+				"--merge-output-format",
+				"mp4",
+			],
+		});
+	}
 
-		if (choices.length === 0) {
-			const cap = maxHeight !== undefined && Number.isFinite(maxHeight) ? maxHeight : undefined;
-			choices.push({
-				id: "v-best",
-				kind: "video",
-				quality: "best",
-				ext: "mp4",
-				label: cap ? `Best up to ${cap}p (mp4)` : "Best Quality (mp4)",
-				args: [
-					"-f",
-					cap ? `bv*[height<=${cap}]+ba/b[height<=${cap}]/bv*+ba/b` : "bv*+ba/b",
-					"--merge-output-format",
-					"mp4",
-				],
-			});
-		}
+	if (choices.length === 0) {
+		choices.push({
+			id: "v-best",
+			kind: "video",
+			quality: "best",
+			ext: "mp4",
+			label: "best available · mp4",
+			args: ["-f", "bv*+ba/b", "--merge-output-format", "mp4"],
+		});
 	}
 
 	const audioSizeLabel = audioSize ? formatBytes(audioSize) : undefined;
 	choices.push({
-		id: `a-${requestedAudioFmt}`,
+		id: "a-mp3",
 		kind: "audio",
-		quality: requestedAudioFmt,
-		ext: requestedAudioFmt,
-		label: `Audio Only (${requestedAudioFmt})${audioSizeLabel ? ` · ~${audioSizeLabel}` : ""}`,
+		quality: "mp3",
+		ext: "mp3",
+		label: `audio only · mp3${audioSizeLabel ? ` · ~${audioSizeLabel}` : ""}`,
 		sizeLabel: audioSizeLabel,
-		args: ["-f", "ba/b", "-x", "--audio-format", requestedAudioFmt, "--audio-quality", "0"],
+		args: ["-f", "ba/b", "-x", "--audio-format", "mp3", "--audio-quality", "0"],
 	});
 
 	return choices;
@@ -304,16 +251,46 @@ interface ExecuteDownloadOptions {
 	args: string[];
 }
 
-export async function executeDownload(
+export type DownloadProgressEvent = {
+	kind: "progress";
+	downloadedBytes: number;
+	totalBytes?: number;
+	speed?: number;
+	eta?: number;
+	part: number;
+	totalParts: number;
+};
+
+export type DownloadProcessingEvent = {
+	kind: "processing";
+};
+
+export type DownloadEvent = DownloadProgressEvent | DownloadProcessingEvent;
+
+const PROGRESS_PREFIX = "YOINK|";
+const PROGRESS_TEMPLATE = `${PROGRESS_PREFIX}%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s`;
+
+/**
+ * Stream yt-dlp download events and return the final file path. Mirrors yoinks'
+ * progress parsing: live bytes/speed/ETA while downloading, processing events
+ * during merge/audio extraction, and the resolved filepath once complete.
+ */
+export async function* downloadWithProgress(
 	opts: ExecuteDownloadOptions,
 	signal?: AbortSignal,
-): Promise<{ filePath: string; cleanup: () => Promise<void> }> {
-	const outPattern = path.join(os.tmpdir(), `snatch-${Date.now()}-%(title).60s.%(ext)s`);
+): AsyncGenerator<DownloadEvent, { filePath: string; cleanup: () => Promise<void> }> {
+	const outDir = os.tmpdir();
+	const outPattern = path.join(outDir, `snatch-${Date.now()}-%(title).60s.%(ext)s`);
 	const args = [
 		...(opts.infoJsonPath ? ["--load-info-json", opts.infoJsonPath] : [opts.url]),
 		...opts.args,
 		"--no-playlist",
 		"--no-warnings",
+		"--newline",
+		"--no-quiet",
+		"--progress",
+		"--progress-template",
+		`download:${PROGRESS_TEMPLATE}`,
 		"--print",
 		"after_move:filepath",
 		"--no-simulate",
@@ -321,23 +298,64 @@ export async function executeDownload(
 		outPattern,
 	];
 
-	const destinations: string[] = [];
 	const { promise, resolve, reject } = Promise.withResolvers<{
 		filePath: string;
 		cleanup: () => Promise<void>;
 	}>();
 	const child = spawn(opts.ytdlp, args, { signal });
-	const stdoutLines: string[] = [];
 	let stderr = "";
+	let filepath = "";
+	let completed = false;
+	let part = 0;
+	let totalParts = 1;
+	let lastDownloaded = 0;
+	let buffer = "";
+	const destinations: string[] = [];
+
+	const eventQueue: DownloadEvent[] = [];
+	let eventResolver: ((value?: unknown) => void) | undefined;
+
+	function pushEvent(event: DownloadEvent) {
+		eventQueue.push(event);
+		eventResolver?.();
+		eventResolver = undefined;
+	}
 
 	child.stdout.on("data", (chunk: Buffer) => {
-		const text = chunk.toString().trim();
-		for (const line of text.split("\n")) {
-			const trimmed = line.trim();
-			if (!trimmed) continue;
-			stdoutLines.push(trimmed);
-			if (path.isAbsolute(trimmed)) {
-				destinations.push(trimmed);
+		buffer += chunk.toString();
+		const lines = buffer.split("\n");
+		buffer = lines.pop() ?? "";
+		for (const rawLine of lines) {
+			const line = rawLine.trim();
+			if (!line) continue;
+			if (line.startsWith(PROGRESS_PREFIX)) {
+				const [downloaded, total, totalEstimate, speed, eta] = line
+					.slice(PROGRESS_PREFIX.length)
+					.split("|");
+				const downloadedBytes = toNumber(downloaded) ?? 0;
+				if (downloadedBytes < lastDownloaded) part++;
+				lastDownloaded = downloadedBytes;
+				pushEvent({
+					kind: "progress",
+					downloadedBytes,
+					totalBytes: toNumber(total) ?? toNumber(totalEstimate),
+					speed: toNumber(speed),
+					eta: toNumber(eta),
+					part,
+					totalParts,
+				});
+			} else if (line.includes("Downloading 1 format(s):")) {
+				totalParts = (line.split("format(s):")[1] ?? "").trim().split("+").length;
+			} else if (line.includes("[Merger]") || line.includes("[ExtractAudio]")) {
+				const merging = /^\[Merger\] Merging formats into "(.+)"$/.exec(line)?.[1];
+				const extracting = /^\[ExtractAudio\] Destination: (.+)$/.exec(line)?.[1];
+				const target = merging ?? extracting;
+				if (target) destinations.push(target);
+				pushEvent({ kind: "processing" });
+			} else if (line.startsWith("[download] Destination: ")) {
+				destinations.push(line.slice("[download] Destination: ".length));
+			} else if (path.isAbsolute(line)) {
+				filepath = line;
 			}
 		}
 	});
@@ -348,29 +366,70 @@ export async function executeDownload(
 
 	child.on("error", reject);
 	child.on("close", (code) => {
-		const filepath = stdoutLines.filter((l) => path.isAbsolute(l)).pop();
-
 		if (signal?.aborted) {
 			void removeFiles(destinations);
 			reject(new Error("Download cancelled."));
 			return;
 		}
 		if (code === 0 && filepath) {
+			completed = true;
 			const cleanup = async () => {
 				const filesToRemove = [filepath, ...destinations];
-				if (opts.infoJsonPath) filesToRemove.push(opts.infoJsonPath);
 				await removeFiles(filesToRemove);
 			};
 			resolve({ filePath: filepath, cleanup });
 		} else {
-			const filesToRemove = [...destinations];
-			if (opts.infoJsonPath) filesToRemove.push(opts.infoJsonPath);
-			void removeFiles(filesToRemove);
-			reject(new Error(cleanYtDlpError(stderr) || `Download failed (exit code ${code})`));
+			void removeFiles(destinations);
+			reject(new Error(cleanYtDlpError(stderr) || `Download failed (exit code ${code}).`));
 		}
 	});
 
-	return promise;
+	try {
+		while (true) {
+			if (eventQueue.length > 0) {
+				const event = eventQueue.shift();
+				if (event) {
+					yield event;
+					continue;
+				}
+			}
+			await new Promise<unknown>((resolveWait) => {
+				eventResolver = resolveWait;
+				// also resolve when the process promise settles so we can return
+				void promise.then(resolveWait, resolveWait);
+			});
+			if (eventQueue.length === 0) break;
+		}
+		return await promise;
+	} finally {
+		// only kill+clean if the consumer abandoned the generator early
+		if (!completed && !child.killed) {
+			child.kill("SIGTERM");
+			void removeFiles(destinations);
+		}
+	}
+}
+
+/**
+ * Wait for a download to finish without observing progress events.
+ */
+export async function executeDownload(
+	opts: ExecuteDownloadOptions,
+	signal?: AbortSignal,
+): Promise<{ filePath: string; cleanup: () => Promise<void> }> {
+	const events = downloadWithProgress(opts, signal);
+	let result = await events.next();
+	while (!result.done) {
+		result = await events.next();
+	}
+	if (!result.value) throw new Error("Download completed without producing a file path.");
+	return result.value;
+}
+
+function toNumber(value: string | undefined): number | undefined {
+	if (!value || value === "NA" || value === "None") return undefined;
+	const n = Number.parseFloat(value);
+	return Number.isFinite(n) ? n : undefined;
 }
 
 function removeFiles(files: string[]): Promise<unknown> {

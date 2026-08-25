@@ -24,6 +24,15 @@ export function apiKeyAuth(): MiddlewareHandler {
 			return;
 		}
 
+		// Signed download routes carry an HMAC that already proves the request
+		// came from this server. Requiring an API key here would break the
+		// browser's EventSource / <a download> flow, which cannot set headers.
+		const path = c.req.path;
+		if (path === "/api/download/progress" || path === "/api/download") {
+			await next();
+			return;
+		}
+
 		const expected = env(c).API_KEY as string | undefined;
 		if (!expected) {
 			await next();

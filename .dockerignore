@@ -2,7 +2,6 @@ node_modules
 dist
 .git
 .astro
-.wrangler
 .env
 .env.local
 .DS_Store

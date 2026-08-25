@@ -1,9 +1,15 @@
+import * as Sentry from "@sentry/bun";
 import { serveStatic } from "hono/bun";
-import app from "./app";
-import { logger } from "./lib/logger";
-import { initSentry } from "./lib/sentry";
+import app, { logger } from "./app";
 
-initSentry();
+const dsn = process.env.SENTRY_DSN;
+if (dsn) {
+	Sentry.init({
+		dsn,
+		environment: process.env.NODE_ENV ?? "production",
+		tracesSampleRate: 0,
+	});
+}
 
 // Serve the static client (packages/web/dist/client, copied to ./public in the
 // Docker image). Falls through to 404 when the dir is absent — e.g. local API

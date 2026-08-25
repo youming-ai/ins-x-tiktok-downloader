@@ -1,5 +1,7 @@
 # Snatch
 
+[![CI](https://github.com/youming-ai/snatch/actions/workflows/ci.yml/badge.svg)](https://github.com/youming-ai/snatch/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) [![Bun](https://img.shields.io/badge/Bun-%3E%3D1.3.14-black)](https://bun.sh)
+
 Social media video downloader — Bun monorepo: a React + TanStack Start SPA served by a Hono API powered by a native `yt-dlp` engine.
 
 ## Supported Sites
@@ -88,51 +90,41 @@ bun run format           # format only
 
 ## Deployment
 
-Two supported topologies.
-
-### All-in-one (Docker / Dokploy) — recommended
-
-The API serves the built SPA and `/api/*` on one origin. This is the only tier
-that runs the yt-dlp engine (it needs `child_process` + a filesystem, so it
-cannot run on Cloudflare Workers/Pages).
+The recommended deployment is the all-in-one Docker image on a VPS. The API
+serves the built SPA and `/api/*` on one origin. This is the only tier that runs
+the yt-dlp engine (it needs `child_process` + a filesystem, so it cannot run on
+Cloudflare Workers/Pages).
 
 ```bash
 cp .env.example .env
+# edit .env with your settings
 docker compose up -d --build
-# App (UI + API) -> http://localhost:38700
+# App (UI + API) -> http://localhost:${APP_PORT}
 ```
 
-On Dokploy: point the app's domain at the `app` service (port `3001`).
-
-### Split origin (Cloudflare Worker frontend + Dokploy API)
-
-Host the static SPA on a Cloudflare Worker (Workers Static Assets) and keep the
-API on Dokploy. The yt-dlp engine cannot run on Workers, so the Worker serves
-only the built client; all `/api/*` calls go to the Dokploy origin.
-
-1. **API (Dokploy)** — deploy the Docker image as above and set
-   `ALLOWED_ORIGINS` to the Worker origin (e.g. `https://snatch.um1ng.me`)
-   so the browser may call `/api/resolve` cross-origin.
-2. **Frontend (Cloudflare Worker)** — `wrangler.jsonc` (repo root) configures an
-   assets-only Worker serving `packages/web/dist/client` with SPA fallback. In the
-   Cloudflare Worker build settings:
-   - Build command: `bun run build:cf`
-   - Deploy command: `bun run deploy:cf` (runs `wrangler deploy`)
-   - Build env `VITE_API_BASE_URL` = the public API origin (e.g. `https://snatch-api.um1ng.me`)
-   - The deploy token needs **Account → Workers Scripts → Edit** (plus `CLOUDFLARE_ACCOUNT_ID`)
-
-Downloads stream directly from the API origin via `Content-Disposition`, so
-only `/api/resolve` needs CORS.
+Put the container behind your reverse proxy (Nginx, Traefik, Caddy, etc.) with a
+TLS certificate. The container listens on port `3001`; `APP_PORT` only changes the
+host-published port. `ALLOWED_ORIGINS` can stay empty because the SPA is served
+same-origin by the API.
 
 ## API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/resolve` | Extract video information and available resolution choices via yt-dlp |
-| GET | `/api/download` | Execute download for chosen format and stream bytes back |
+| GET | `/api/download/progress` | Server-sent events: run yt-dlp for the selected format and stream live progress |
+| GET | `/api/download` | Deliver the prepared file after the progress endpoint signals it is ready |
 | GET | `/api/info` | Query engine status |
 | GET | `/health` | Health check |
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md). PRs welcome — please run `bunx biome ci . && bun run typecheck && bun test && bun run build` before pushing.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for reporting vulnerabilities.
+
 ## License
 
-MIT
+[MIT](LICENSE)

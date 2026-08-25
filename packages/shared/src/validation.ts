@@ -1,5 +1,3 @@
-import { WHITESPACE_ONLY_REGEX } from "./constants";
-
 function parseHttpUrl(url: string): URL | null {
 	try {
 		const parsed = new URL(url.trim());
@@ -69,7 +67,7 @@ export function validateUrl(url: string): { valid: boolean; error?: string } {
 
 	const trimmed = url.trim();
 
-	if (WHITESPACE_ONLY_REGEX.test(trimmed)) {
+	if (/\s/.test(trimmed)) {
 		return {
 			valid: false,
 			error: "URL contains invalid characters. Only standard URL characters are allowed.",
