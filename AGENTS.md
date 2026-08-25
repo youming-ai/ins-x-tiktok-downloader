@@ -1,12 +1,12 @@
 # Repository Guidelines
 
-Bun monorepo (3 workspace packages) that resolves and downloads media from social platforms. A React 19 + TanStack Start SPA (no SSR) talks to a Hono API that wraps a self-provisioning `yt-dlp` binary as its extraction engine. Ships two ways: **all-in-one** (API serves the built SPA on one origin — the Docker image) or **split** (SPA on a Cloudflare Worker, API on Dokploy).
+Bun monorepo (3 workspace packages) that resolves and downloads media from social platforms. A React 19 + TanStack Start SPA (no SSR) talks to a Hono API that wraps a self-provisioning `yt-dlp` binary as its extraction engine. Ships as an **all-in-one** Docker image: the API serves the built SPA and the `/api/*` routes on one origin.
 
 ## Project Overview
 
-- Paste a URL → API probes it with `yt-dlp` → returns signed per-format download choices → browser downloads directly from the API via a plain `<a download>`.
+- Paste a URL → API probes it with `yt-dlp` → returns signed per-format download choices → browser opens an SSE progress stream → once the file is ready it downloads directly from the API via a plain `<a download>`.
 - Supported sites: whatever `yt-dlp` reaches (~1,800). There is **no** host allowlist — `validateUrl` accepts any public http(s) URL and only refuses private/loopback/link-local/single-label hosts. `SERVICES` in `packages/shared/src/constants.ts` is UI copy for the "popular services" grid, mirroring upstream [yoinks](https://github.com/pablostanley/yoinks).
-- The engine needs `child_process` + a writable filesystem, so it **cannot run on Cloudflare Workers/Pages** — only the static SPA can be hosted there (why the split topology exists; the Worker serves assets only).
+- The engine needs `child_process` + a writable filesystem, so it **cannot run on Cloudflare Workers/Pages** — the all-in-one Docker image is the intended production shape.
 
 ## Package Boundaries
 
@@ -22,16 +22,16 @@ Import graph is strictly one-directional: `shared → {api, web}`; api and web n
 
 ```
 All-in-one:  GET /             → Hono serves built SPA from ./public (serveStatic)
-Split:       GET /             → Cloudflare Worker serves the SPA (assets only)
-Both:        POST /api/resolve → cors → rateLimit → apiKeyAuth → validateUrl
-                                 → yt-dlp probe → buildChoices → HMAC-signed URLs
-             GET  /api/download → verify signature → yt-dlp exec → stream + cleanup
+             POST /api/resolve → cors → rateLimit → apiKeyAuth → validateUrl
+                                 → yt-dlp probe → buildChoices → HMAC-signed progress URL
+             GET  /api/download/progress → verify signature → yt-dlp exec → SSE progress events
+             GET  /api/download → verify file-path signature → stream + cleanup
 ```
 
 - **Middleware order** (`src/app.ts`): `pinoLogger` (all) → `cors` → `rateLimit` → `apiKeyAuth`, all on `/api/*`, then routers at `/`. `app.onError` is the global net. `GET /health` is at root, outside `/api/*`, so it bypasses all middleware.
-- **Signed downloads**: `/api/resolve` builds each choice's `/api/download` URL absolute to the API origin and HMAC-signs the params (`lib/security.ts`). Cross-origin downloads need no CORS because they are an `<a download>` navigation, not a `fetch`. Only `POST /api/resolve` is a cross-origin `fetch`, gated by `ALLOWED_ORIGINS`. `/api/download` re-validates URL, re-verifies signature (timing-safe), and re-validates options at the boundary.
+- **Signed downloads**: `/api/resolve` builds each choice's `/api/download/progress` URL absolute to the API origin and HMAC-signs the params (`lib/security.ts`). The progress endpoint runs yt-dlp, then signs a short-lived `/api/download?file=...` URL for the prepared file. `/api/download` re-verifies that file-path signature (timing-safe). Cross-origin downloads need no CORS because they are an `<a download>` navigation, not a `fetch`. Only `POST /api/resolve` is a cross-origin `fetch`, gated by `ALLOWED_ORIGINS`.
 - **Two error shapes on `/api/resolve`**: validation failures → `400 {success:false, error}`; engine failures → `200 {status:"error", error:{code,message}}`. Clients branch on both `!response.ok` and `data.status === "error"`.
-- **Engine** (`lib/ytdlp.ts`): `ensureYtDlp()` resolves the binary (PATH → `$YTDLP_DIR` cache → download), `probe()` runs `yt-dlp -J` and shape-guards stdout via `parseVideoInfo()`, `buildChoices()` derives video/audio choices, `executeDownload()` streams the file. `ffmpeg` on PATH is required for merges and audio extraction.
+- **Engine** (`lib/ytdlp.ts`): `ensureYtDlp()` resolves the binary (PATH → `$YTDLP_DIR` cache → download), `probe()` runs `yt-dlp -J` and shape-guards stdout via `parseVideoInfo()`, `buildChoices()` derives video/audio choices, `downloadWithProgress()` runs yt-dlp with a `PROGRESS_TEMPLATE` and yields bytes/speed/ETA/processing events (mirroring yoinks), `executeDownload()` waits for completion and returns a cleanup callback. `ffmpeg` on PATH is required for merges and audio extraction.
 - **Env access split**: request-scoped config (`ALLOWED_ORIGINS`, `API_RATE_LIMIT_*`, `API_KEY`, `PROXY_SIGNING_KEY`) via `env(c)`; process-lifetime config (`PORT`, `STATIC_ROOT`, `LOG_LEVEL`, `SENTRY_DSN`, `YTDLP_DIR`) via `process.env`. Web reads `import.meta.env` (`VITE_` prefix only).
 
 ## Key Directories
@@ -56,9 +56,9 @@ Both:        POST /api/resolve → cors → rateLimit → apiKeyAuth → validat
 - `packages/api/src/schemas/media.ts` — `resolveInputSchema` layers shared `validateUrl` onto structural Zod checks; narrow new request options here.
 - `packages/shared/src/validation.ts` — exports only `validateUrl()` (pure). No `sanitizeUrl`, no `detectPlatform`.
 - `packages/shared/src/constants.ts` — `SERVICES` (UI labels only, no hosts). `types.ts` — wire contract + `AUDIO_FORMATS`/`VIDEO_QUALITIES`/`DOWNLOAD_MODES`.
-- `packages/web/src/config.ts` — `API_BASE_URL` from `VITE_API_BASE_URL`. `components/DownloaderApp.tsx` — owns UI state + resolve/download flow.
+- `packages/web/src/config.ts` — `API_BASE_URL` (empty; SPA is served same-origin by the API). `components/DownloaderApp.tsx` — owns UI state + resolve/download flow.
 - `packages/web/src/routeTree.gen.ts` — generated; commit it, never edit, excluded from Biome.
-- `biome.json`, `bunfig.toml` (`[test] root="."`), `wrangler.jsonc` (assets-only SPA Worker → `packages/web/dist/client`), `packages/api/Dockerfile` (two-stage; runtime installs `ca-certificates` + `ffmpeg` only), `docker-compose.yml` (external `dokploy-network` required), `.env.example`, `.github/workflows/ci.yml`.
+- `biome.json`, `bunfig.toml` (`[test] root="."`), `packages/api/Dockerfile` (two-stage; runtime installs `ca-certificates` + `ffmpeg` only), `docker-compose.yml` (generic VPS), `.env.example`, `.github/workflows/ci.yml`.
 
 ## Development Commands
 
@@ -71,8 +71,6 @@ bun dev              # :5173 — Vite, proxies /api → :3001
 
 # Build / deploy — ALWAYS `bun run` for aggregate scripts
 bun run build        # shared typecheck + api build + web build
-bun run build:cf     # shared typecheck + web build (Cloudflare Worker frontend)
-bun run deploy:cf    # wrangler deploy (assets-only Worker; needs Workers Scripts:Edit token)
 
 bun test             # all packages (bunfig.toml discovers every *.test.ts)
 bun run typecheck    # tsc --noEmit across all packages (pre-push hook)
@@ -115,7 +113,7 @@ bun run docker:up    # docker compose up -d --build
 |---|---|---|---|
 | `APP_PORT` | docker-compose | `38700` | Host port for `app` |
 | `PORT` | API | `3001` | Container listen port |
-| `ALLOWED_ORIGINS` | API | `""` (reject all) | Comma-separated CORS allowlist for `/api/*`. **Split** must include the Worker origin |
+| `ALLOWED_ORIGINS` | API | `""` (reject all) | Comma-separated CORS allowlist for `/api/*`. Unused in the all-in-one build (SPA is same-origin). |
 | `API_KEY` | API | `""` (public) | When set, `/api/*` requires `Authorization: Api-Key <value>` |
 | `API_RATE_LIMIT_MAX` / `_WINDOW` | API | `30` / `60000` | Rate limit count / window (ms) |
 | `PROXY_SIGNING_KEY` | API | `""` (random) | HMAC key for media URLs. Empty → random per-process key (links die on restart) |
@@ -124,12 +122,11 @@ bun run docker:up    # docker compose up -d --build
 | `SENTRY_DSN` | API | `""` | `@sentry/bun` DSN; disabled when unset |
 | `YTDLP_DIR` | API | `~/.snatch/bin` | yt-dlp binary cache (Docker: `/data/yt-dlp`) |
 | `VITE_API_TARGET` | web (dev) | `http://localhost:3001` | Vite `/api` proxy target |
-| `VITE_API_BASE_URL` | web (build) | `""` (same-origin) | **Split** only: absolute API origin baked into the client |
 | `VITE_SENTRY_DSN` | web (build) | `""` | `@sentry/react` DSN; disabled when unset |
 
 ## CI, Git Hooks & Attribution
 
-- **CI** (`.github/workflows/ci.yml`, on PR + push to `main`): install → `bunx biome ci .` → `bun run typecheck` → `bun test` → `bun run build`. Validation-only; deploys happen out-of-band (Dokploy webhook; Cloudflare Worker build runs `build:cf` + `deploy:cf`).
+- **CI** (`.github/workflows/ci.yml`, on PR + push to `main`): install → `bunx biome ci .` → `bun run typecheck` → `bun test` → `bun run build`. Validation-only; deploys happen out-of-band on the VPS.
 - **Git hooks: lefthook** (not Husky). pre-commit → Biome on staged files (auto-stages fixes); pre-push → `bun run typecheck`.
 - AI-assisted commits MUST include: `Co-Authored-By: Claude <noreply@anthropic.com>`.
 

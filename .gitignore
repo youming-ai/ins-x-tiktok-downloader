@@ -33,7 +33,6 @@ data/
 !.env.example
 
 # Application specific
-.wrangler
 uploads/
 downloads/
 secrets.json

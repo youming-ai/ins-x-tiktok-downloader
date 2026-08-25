@@ -1,6 +1,7 @@
 {
 	"name": "snatch",
 	"private": true,
+	"license": "MIT",
 	"packageManager": "bun@1.3.14",
 	"workspaces": [
 		"packages/*"
@@ -11,8 +12,6 @@
 		"build": "bun --filter '@snatch/shared' typecheck && bun --filter '@snatch/api' build && bun --filter '@snatch/web' build",
 		"build:api": "bun --filter '@snatch/shared' typecheck && bun --filter '@snatch/api' build",
 		"build:web": "bun --filter '@snatch/web' build",
-		"build:cf": "bun --filter '@snatch/shared' typecheck && bun --filter '@snatch/web' build:cf",
-		"deploy:cf": "bunx wrangler@4 deploy",
 		"preview": "bun --filter '@snatch/web' preview",
 		"test": "bun --filter '*' test",
 		"test:shared": "bun --filter '@snatch/shared' test",
@@ -28,7 +27,7 @@
 		"prepare": "lefthook install"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.5.5",
+		"@biomejs/biome": "^2.5.10",
 		"@types/bun": "latest",
 		"lefthook": "^2.1.10"
 	}

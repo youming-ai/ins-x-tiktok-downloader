@@ -1,9 +1,25 @@
+import * as Sentry from "@sentry/bun";
 import { Hono } from "hono";
 import { env } from "hono/adapter";
 import { cors } from "hono/cors";
 import { type PinoLogger, pinoLogger } from "hono-pino";
-import { logger } from "./lib/logger";
-import { Sentry } from "./lib/sentry";
+import pino from "pino";
+
+export const logger = pino({
+	level: process.env.LOG_LEVEL ?? "info",
+	redact: {
+		paths: [
+			"req.headers.authorization",
+			"req.headers.cookie",
+			"req.headers['set-cookie']",
+			"res.headers['set-cookie']",
+		],
+		censor: "[redacted]",
+	},
+});
+
+export { Sentry };
+
 import { apiKeyAuth } from "./middleware/auth";
 import { rateLimit } from "./middleware/rate-limit";
 import { downloadRouter } from "./routes/download";

@@ -4,8 +4,8 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 // TanStack Start in SPA mode: no SSR runtime, prerenders a static shell + client
-// bundle that the all-in-one API serves from ./public and Cloudflare Pages hosts.
-// In dev, /api is proxied to the local API server for same-origin behavior.
+// bundle that the all-in-one API serves from ./public. In dev, /api is proxied
+// to the local API server for same-origin behavior.
 export default defineConfig({
 	server: {
 		port: 5173,
@@ -24,7 +24,7 @@ export default defineConfig({
 		host: "127.0.0.1",
 	},
 	plugins: [
-		tanstackStart({ spa: { enabled: true, prerender: { outputPath: "/index" } } }),
+		tanstackStart({ spa: { enabled: true, prerender: { outputPath: "/index" } } }), // ponytail: SPA — dist/server is dead artifact, cleaned by build script (API serves only dist/client)
 		// react's plugin must come after start's plugin
 		react(),
 		tailwindcss(),
